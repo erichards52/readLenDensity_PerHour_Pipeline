@@ -1,0 +1,228 @@
+---
+title: "Read Density & Output Report (Cohort TALL)"
+author: "Edward Richards"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+params:
+  gbsFile:
+    value: x
+---
+#### Dataset: Cohort_Heomnc
+#### Filters: Duplicates, NA's, Qual. Score >=7
+
+```{r setup, include=FALSE, dev="CairoPNG"}
+knitr::opts_chunk$set(dev.args = list(png = list(type = "cairo")))
+```
+
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='hide'}
+setHook(packageEvent("grDevices", "onLoad"),
+function(...) grDevices::X11.options(type='cairo'))
+options(device='x11')
+```
+
+```{r,warning=FALSE,message=FALSE, echo=F, results='asis', fig.width=14, fig.height=6, fig.align = "center"}
+# Load libraries and read in sequencing summary
+require(ggplot2)
+require(rmarkdown)
+require(Cairo)
+require(knitr)
+require(ggplot2)
+require(dplyr)
+require(kableExtra)
+options(scipen = 999)
+knitr::opts_chunk$set(dev.args = list(png = list(type = "cairo")))
+gbsDf <- read.delim(params$gbsFile, header = T, sep = "\t")
+gbsDf <- gbsDf[!duplicated(gbsDf),]
+names(gbsDf)[1] <- "Hours"
+gbsDf$Hours <- as.factor(gbsDf$Hours)
+NoRows <- nrow(gbsDf)
+if (NoRows >= 60) {
+  NoRowsHalf <- NoRows/2
+  if (gbsDf[NoRows,1] == "72") {
+    gbsDf1 <- gbsDf[1:NoRowsHalf-1,]
+    NoRows1 <- nrow(gbsDf1) + 1
+    gbsDf2 <- gbsDf[NoRows1:NoRows,]
+  } else if (gbsDf[NoRows,1] == "48") {
+    gbsDf1 <- gbsDf[1:NoRowsHalf-2,]
+    NoRows1 <- nrow(gbsDf1) + 1
+    gbsDf2 <- gbsDf[NoRows1:NoRows,]
+  } else if (gbsDf[NoRows,1] == "24") {
+    gbsDf1 <- gbsDf[1:NoRowsHalf-3,]
+    NoRows1 <- nrow(gbsDf1) + 1
+    gbsDf2 <- gbsDf[NoRows1:NoRows,]
+  }
+}
+if (NoRows >= 60) {
+  dfList <- list(gbsDf1, gbsDf2)
+for (i in dfList) {
+  p <- ggplot(i,aes(x = Flowcell_ID, 
+                     y = Gigabases, color=Hours)) +
+    geom_point() + 
+    scale_color_manual(values=c('#000000','#FF0000', '#0F00FF'))+
+    scale_shape_identity() +
+    #To set x axis labels as vertical 
+    theme(text=element_text(size=15),axis.text.x = element_text(angle = 90, 
+                                     hjust = 1,
+                                     vjust = 0.5,
+                                     size=13,
+                                     face="bold"))+
+    guides(fill=guide_legend(title="Hours"))
+  print(p + coord_flip())
+}
+} else {
+    p <- ggplot(gbsDf,aes(x = Flowcell_ID, 
+                     y = Gigabases, color=Hours)) +
+    geom_point() + 
+    scale_color_manual(values=c('#000000','#FF0000', '#0F00FF'))+
+    scale_shape_identity() +
+    #To set x axis labels as vertical 
+    theme(text=element_text(size=15),axis.text.x = element_text(angle = 90, 
+                                     hjust = 1,
+                                     vjust = 0.5,
+                                     size=13,
+                                     face="bold"))+
+    guides(fill=guide_legend(title="Hours"))
+  print(p + coord_flip())
+}
+```
+
+#### 24, 48 and 72 Hours Sequencing Stacked Barplot
+
+```{r,warning=FALSE,message=FALSE, echo=F, results='asis', fig.width=14, fig.height=20, fig.align = "center"}
+if (NoRows >= 60) {
+for (i in dfList) {
+  NoRows = nrow(i)
+  gbsPerHourDf <- data.frame(matrix(nrow = NoRows, ncol = 3))
+  colnames(gbsPerHourDf) <- colnames(i)
+  gbsPerHourDf[1:NoRows,1] <- levels(i$Hours)
+  gbsPerHourDf[1:NoRows,3] <- i$Flowcell_ID
+  for (n in 1:(nrow(i))) {
+    if (gbsPerHourDf[n,1]!="72") {
+      gbsPerHourDf[n+1,2] = gbsDf[n+1,2] - gbsDf[n,2]
+    } else if (gbsPerHourDf[n,1]=="72") {
+      gbsPerHourDf[n-2,2] = gbsDf[n-2,2]
+    }
+  }
+  
+  pStackBar <- ggplot(gbsPerHourDf, aes(fill=factor(Hours,levels=c("72","48","24")), y=Gigabases, x=Flowcell_ID)) + 
+    geom_bar(position="stack", stat="identity") +
+    theme(text=element_text(size=15),axis.text.x = element_text(angle = 90, 
+                                     hjust = 1,
+                                     vjust = 0.5,
+                                     size=13,
+                                     face="bold"))+
+    guides(fill=guide_legend(title="Hours"))
+  
+  pStackBar <- pStackBar +  scale_colour_manual(values=c('#000000','#FF0000', '#0F00FF'))
+  print(pStackBar + coord_flip())
+}
+} else {
+    NoRows = nrow(gbsDf)
+  gbsPerHourDf <- data.frame(matrix(nrow = NoRows, ncol = 3))
+  colnames(gbsPerHourDf) <- colnames(gbsDf)
+  gbsPerHourDf[1:NoRows,1] <- levels(gbsDf$Hours)
+  gbsPerHourDf[1:NoRows,3] <- gbsDf$Flowcell_ID
+  for (n in 1:(nrow(gbsDf))) {
+    if (gbsPerHourDf[n,1]!="72") {
+      gbsPerHourDf[n+1,2] = gbsDf[n+1,2] - gbsDf[n,2]
+    } else if (gbsPerHourDf[n,1]=="72") {
+      gbsPerHourDf[n-2,2] = gbsDf[n-2,2]
+    }
+  }
+  
+  pStackBar <- ggplot(gbsPerHourDf, aes(fill=factor(Hours,levels=c("72","48","24")), y=Gigabases, x=Flowcell_ID)) + 
+    geom_bar(position="stack", stat="identity") +
+    theme(text=element_text(size=15),axis.text.x = element_text(angle = 90, 
+                                     hjust = 1,
+                                     vjust = 0.5,
+                                     size=13,
+                                     face="bold"))+
+    axis.text.y = element_text(color = "grey20", size = 20, angle = 0, hjust = 1, vjust = 0, face = "bold")+
+            axis.title.x = element_text(color = "grey20", size = 12, angle = 0, hjust = .5, vjust = 0, face = "plain")+
+    guides(fill=guide_legend(title="Hours"))
+  
+  pStackBar <- pStackBar +  scale_colour_manual(values=c('#000000','#FF0000', '#0F00FF'))
+  print(pStackBar + coord_flip())
+}
+```
+
+
+```{r,warning=FALSE,message=FALSE, echo=F, results='asis', fig.width=14, fig.height=20, fig.align = "center"}
+if (NoRows >= 60) {
+for (i in dfList) {
+  pDodgeStackBar <- ggplot(i, aes(fill=factor(Hours,levels=c("72","48","24")), y=Gigabases, x=Flowcell_ID)) + 
+    geom_bar(position="dodge", stat="identity") + 
+    theme(text=element_text(size=15),axis.text.x = element_text(angle = 90, 
+                                     hjust = 1,
+                                     vjust = 0.5,
+                                     size=13,
+                                     face="bold"))+
+      guides(fill=guide_legend(title="Hours"))
+  pDodgeStackBar <- pDodgeStackBar +  scale_colour_manual(values=c('#000000','#FF0000', '#0F00FF'))
+#  print(pDodgeStackBar + coord_flip())
+}
+} else {
+    pDodgeStackBar <- ggplot(gbsDf, aes(fill=factor(Hours,levels=c("72","48","24")), y=Gigabases, x=Flowcell_ID)) + 
+    geom_bar(position="dodge", stat="identity") + 
+    theme(text=element_text(size=15),axis.text.x = element_text(angle = 90, 
+                                     hjust = 1,
+                                     vjust = 0.5,
+                                     size=13,
+                                     face="bold"))+
+      guides(fill=guide_legend(title="Hours"))
+  pDodgeStackBar <- pDodgeStackBar +  scale_colour_manual(values=c('#000000','#FF0000', '#0F00FF'))
+ # print(pDodgeStackBar + coord_flip())
+}
+```
+
+#### 24, 48 and 72 Hours Sequencing Proportionally Stacked Barplot
+
+```{r,warning=FALSE,message=FALSE, echo=F, results='asis', fig.width=14, fig.height=20, fig.align = "center"}
+if (NoRows >= 60) {
+for (i in dfList) {
+  NoRows = nrow(i)
+  gbsPerHourDf <- data.frame(matrix(nrow = NoRows, ncol = 3))
+  colnames(gbsPerHourDf) <- colnames(i)
+  gbsPerHourDf[1:NoRows,1] <- levels(i$Hours)
+  gbsPerHourDf[1:NoRows,3] <- i$Flowcell_ID
+  for (n in 1:(nrow(i))) {
+    if (gbsPerHourDf[n,1]!="72") {
+      gbsPerHourDf[n+1,2] = gbsDf[n+1,2] - gbsDf[n,2]
+    } else if (gbsPerHourDf[n,1]=="72") {
+      gbsPerHourDf[n-2,2] = gbsDf[n-2,2]
+    }
+  }
+  pPropStackBar <- ggplot(gbsPerHourDf,aes(fill=factor(Hours,levels=c("72","48","24")), y=Gigabases, x=Flowcell_ID)) + 
+    geom_bar(position="fill",stat="identity") + 
+    theme(text=element_text(size=15),axis.text.x = element_text(angle = 90, 
+                                     hjust = 1,
+                                     vjust = 0.5,
+                                     size=13,
+                                     face="bold"))+
+      guides(fill=guide_legend(title="Hours"))
+  print(pPropStackBar + coord_flip())
+}
+} else {
+  NoRows = nrow(gbsDf)
+  gbsPerHourDf <- data.frame(matrix(nrow = NoRows, ncol = 3))
+  colnames(gbsPerHourDf) <- colnames(gbsDf)
+  gbsPerHourDf[1:NoRows,1] <- levels(gbsDf$Hours)
+  gbsPerHourDf[1:NoRows,3] <- gbsDf$Flowcell_ID
+  for (n in 1:(nrow(gbsDf))) {
+    if (gbsPerHourDf[n,1]!="72") {
+      gbsPerHourDf[n+1,2] = gbsDf[n+1,2] - gbsDf[n,2]
+    } else if (gbsPerHourDf[n,1]=="72") {
+      gbsPerHourDf[n-2,2] = gbsDf[n-2,2]
+    }
+  }
+  pPropStackBar <- ggplot(gbsPerHourDf,aes(fill=factor(Hours,levels=c("72","48","24")), y=Gigabases, x=Flowcell_ID)) + 
+    geom_bar(position="fill",stat="identity") + 
+    theme(text=element_text(size=15),axis.text.x = element_text(angle = 90, 
+                                     hjust = 1,
+                                     vjust = 0.5,
+                                     size=13,
+                                     face="bold"))+
+      guides(fill=guide_legend(title="Hours"))
+  print(pPropStackBar + coord_flip())
+}
+
