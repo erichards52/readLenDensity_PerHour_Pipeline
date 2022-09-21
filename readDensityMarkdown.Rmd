@@ -1,0 +1,523 @@
+---
+title: "Read Density & Output Report (Cohort TALL)"
+author: "Edward Richards"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+params:
+  seqFile:
+    value: x
+---
+#### Dataset: 
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='asis'}
+cat("####", params$seqFile, "\n")
+```
+#### Filters: Duplicates, NA's, Qual. Score >=7
+
+```{r setup, include=FALSE, dev="CairoPNG"}
+knitr::opts_chunk$set(dev.args = list(png = list(type = "cairo")))
+```
+
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='hide'}
+setHook(packageEvent("grDevices", "onLoad"),
+function(...) grDevices::X11.options(type='cairo'))
+options(device='x11')
+
+# Load libraries and read in sequencing summary
+require(rmarkdown)
+require(Cairo)
+require(knitr)
+require(ggplot2)
+require(scales)
+require(dplyr)
+require(kableExtra)
+require(forcats)
+require(bigreadr)
+require(data.table)
+library(bigreadr)
+options(scipen = 999)
+knitr::opts_chunk$set(dev.args = list(png = list(type = "cairo")))
+
+# Filters reads below length of 1000bp
+# Filters duplicate read_ids
+# Filters for NA values
+seqSumTab <- read.delim(params$seqFile, header = T, sep = "\t")
+if(("X.1"  %in% colnames(seqSumTab))&("X" %in% colnames(seqSumTab))) {
+if(!is.na(seqSumTab$X.1))
+{
+  seqSumTab=subset(seqSumTab, select=c("read_id", "start_time","sequence_length_template","mean_qscore_template","X.1"))
+  seqSumTab <- seqSumTab %>% 
+  rename(
+    read_len = sequence_length_template,
+    mean_qscore = mean_qscore_template,
+    Flowcell.ID = X.1
+    )
+} else if (!is.na(seqSumTab$X)) {
+  seqSumTab=subset(seqSumTab, select=c("read_id", "start_time","sequence_length_template","mean_qscore_template","X"))
+  seqSumTab <- seqSumTab %>% 
+  rename(
+    read_len = sequence_length_template,
+    mean_qscore = mean_qscore_template,
+    Flowcell.ID = X
+    )
+} else if (!is.na(seqSumTab$Flowcell.ID)) {
+  seqSumTab=subset(seqSumTab, select=c("read_id", "start_time","sequence_length_template","mean_qscore_template","Flowcell.ID"))
+  seqSumTab <- seqSumTab %>% 
+  rename(
+    read_len = sequence_length_template,
+    mean_qscore = mean_qscore_template,
+    )
+}
+} else if ("X" %in% colnames(seqSumTab)) {
+  if (!is.na(seqSumTab$X)) {
+  seqSumTab=subset(seqSumTab, select=c("read_id", "start_time","sequence_length_template","mean_qscore_template","X"))
+  seqSumTab <- seqSumTab %>% 
+  rename(
+    read_len = sequence_length_template,
+    mean_qscore = mean_qscore_template,
+    Flowcell.ID = X
+    )
+  } else if (!is.na(seqSumTab$Flowcell.ID)) {
+  seqSumTab=subset(seqSumTab, select=c("read_id", "start_time","sequence_length_template","mean_qscore_template","Flowcell.ID"))
+  seqSumTab <- seqSumTab %>% 
+  rename(
+    read_len = sequence_length_template,
+    mean_qscore = mean_qscore_template,
+    ) } else {
+    seqSumTab=subset(seqSumTab, select=c("read_id", "start_time","sequence_length_template","mean_qscore_template","Flowcell.ID"))
+  seqSumTab <- seqSumTab %>% 
+  rename(
+    read_len = sequence_length_template,
+    mean_qscore = mean_qscore_template,
+    )
+  }
+} else {
+    seqSumTab=subset(seqSumTab, select=c("read_id", "start_time","sequence_length_template","mean_qscore_template","Flowcell.ID"))
+  seqSumTab <- seqSumTab %>% 
+  rename(
+    read_len = sequence_length_template,
+    mean_qscore = mean_qscore_template,
+    )
+  }
+seqSumTabSubSet <-seqSumTab[which(seqSumTab[,3]>1000),]
+seqSumTabSubSet <- seqSumTabSubSet[!duplicated(seqSumTabSubSet$read_id),]
+seqSumTabSubSet <- na.omit(seqSumTabSubSet)
+seqSumTabSubSetPass <-seqSumTabSubSet[which(seqSumTabSubSet[,4]>=7),]
+
+# Calculate n50, total length, number of reads, average length, N90, x_border, max_len, min_len, sum_stats
+read_len <- as.numeric(seqSumTabSubSetPass$read_len)
+readLenList.sorted <- rev(sort(read_len))
+total_length <- sum(read_len)
+num_reads <- length(read_len)
+avg_length <- mean(read_len)
+N50 <- readLenList.sorted[cumsum(as.numeric((readLenList.sorted))) >= sum(readLenList.sorted)*0.5][1]
+N90 <- readLenList.sorted[cumsum(as.numeric((readLenList.sorted))) >= sum(readLenList.sorted)*0.9][1]
+x_border <- readLenList.sorted[cumsum(readLenList.sorted) >= total_length*0.001][1]
+max_len <- readLenList.sorted[1]
+min_len <- tail(readLenList.sorted, n = 1)
+sum_stats <- c(total_length, num_reads, avg_length, N50, N90, max_len, min_len,x_border)
+names(sum_stats) <- c("total_length", "num_reads", "avg_length", "N50", "N90", "max_len", "min_len",
+                      "x_border")
+
+# Make a pretty plot of read lengths
+p <- ggplot(data=seqSumTabSubSetPass, aes(read_len)) + 
+  geom_histogram(breaks=seq(0, sum_stats["x_border"] + 1000, by = 50), fill="blue", alpha = .4) 
+x_range_max <- ggplot_build(p)$layout$panel_ranges[[1]]$x.range[2]
+y_range_max <- ggplot_build(p)$layout$panel_ranges[[1]]$y.range[2]
+x_text_1 <- 0.4*x_range_max
+y_text_1 <- 0.6*y_range_max
+title="Read Length Distribution"
+
+
+p <- p + geom_vline(xintercept = sum_stats["N50"], colour="red", linetype = "dashed") +
+  annotate("text", x = x_text_1, y = y_text_1, hjust = 0, size=6,
+           label = sprintf("N50 = %d bp\nnum_seqs: %s\navg_len: %s bp\nmax_len = %s bp\nsum_len = %s bp", 
+                           sum_stats["N50"], 
+                           prettyNum(sum_stats["num_reads"], big.mark=",",scientific=FALSE),
+                           prettyNum(sum_stats["avg_length"], big.mark=",",scientific=FALSE),
+                           prettyNum(sum_stats["max_len"], big.mark=",",scientific=FALSE),
+                           prettyNum(sum_stats["total_length"], big.mark=",",scientific=FALSE))) +
+  ggtitle(title) + theme_light() +
+  theme_update(plot.title = element_text(hjust = 0.5, size = 16, face="bold")) +
+  labs(x="Read length (bp)", y="Counts")
+
+# Create df for read stats
+statsDf <- data.frame(matrix(nrow = 7, ncol = 1))
+colnames(statsDf) <- "Values"
+rownames(statsDf) <- c("Total Length", "Number of Reads", "Average Length", "N50", "N90", "Max Length", "Min. Length")
+statsDf[1,1] <- total_length
+statsDf[2,1] <- num_reads
+statsDf[3,1] <- avg_length
+statsDf[4,1] <- N50
+statsDf[5,1] <- N90
+statsDf[6,1] <- max_len
+statsDf[7,1] <- min_len
+statsDfFormatted <-apply(statsDf, 2, function(x) format(x, big.mark= ",", scientific = F))
+
+```
+### Sequencing Summary Stats
+```{r echo=FALSE}
+#Create table & plot with proper formatting
+kable(statsDfFormatted) %>%
+  kable_styling(bootstrap_options = "striped", full_width=F, position="left")
+```
+
+### Read Length Density (sorted distribution)
+```{r echo=F, results='asis', out.width = "70%", fig.align = "center"}
+p
+```
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='hide'}
+# Create bin tags and values
+b <- c(1, 5000,10000,15000,20000,25000,30000,35000,40000,
+            45000,50000,55000,60000,65000,70000,75000,80000,85000,
+            90000,95000,100000, 1000000)
+tags <- c("1-5","5-10", "10-15", "15-20",
+          "20-25", "25-30","30-35", "35-40",
+          "40-45", "45-50","50-55","55-60", "60-65", 
+          "65-70", "70-75","75-80", "80-85",
+          "85-90", "90-95","95-100", "100+")
+seqSumTabSubSetPass$read_len.cat <- cut(seqSumTabSubSetPass$read_len, breaks = b, labels = tags)
+
+# Binned read density plot
+binPlot <- ggplot(data=seqSumTabSubSetPass, 
+                  aes(read_len.cat, fill=read_len.cat)) + 
+  stat_count(width = 0.5, position = position_dodge(width=1.2)) +
+  xlab("kbp") + 
+  ylab("Count") + 
+  ggtitle("Read Length Density") + 
+  guides(fill=FALSE) +
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"))
+```
+### Binned Read Length Density 
+```{r echo=F, results='asis', fig.width = 12, fig.align = "center", fig.asp=0.62}
+binPlot
+```
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='hide'}
+#Create df & plot of total length of reads/total bps per bin
+totLenBinsDf <- data.frame(matrix(nrow = 21, ncol = 2))
+colnames(totLenBinsDf) <- c("Bin", "tot_len_per_bin")
+tagList <- list(tags)
+totLenBinsDf$Bin <- unlist(tagList)
+
+# Calculate total length of bps within each bin and assign to df
+totLenBinsDf[1,2] <- sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="1-5")])
+totLenBinsDf[2,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="5-10")])
+totLenBinsDf[3,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="10-15")])
+totLenBinsDf[4,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="15-20")])
+totLenBinsDf[5,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="20-25")])
+totLenBinsDf[6,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="25-30")])
+totLenBinsDf[7,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="30-35")])
+totLenBinsDf[8,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="35-40")])
+totLenBinsDf[9,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="40-45")])
+totLenBinsDf[10,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="45-50")])
+totLenBinsDf[11,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="50-55")])
+totLenBinsDf[12,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="55-60")])
+totLenBinsDf[13,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="60-65")])
+totLenBinsDf[14,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="65-70")])
+totLenBinsDf[15,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="70-75")])
+totLenBinsDf[16,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="75-80")])
+totLenBinsDf[17,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="80-85")])
+totLenBinsDf[18,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="85-90")])
+totLenBinsDf[19,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="90-95")])
+totLenBinsDf[20,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="95-100")])
+totLenBinsDf[21,2] <-sum(seqSumTabSubSetPass$read_len[which(seqSumTabSubSetPass$read_len.cat=="100+")])
+
+
+# Binned read density plot
+totLenBinsPlot <- ggplot(data=totLenBinsDf, 
+                  aes(x=fct_inorder(Bin), y=tot_len_per_bin,fill=Bin)) + 
+  geom_bar(stat='identity',width = 0.5, position = position_dodge(width=0.5)) +
+  xlab("Bins (kbp)") + 
+  ylab("bp") + 
+  ggtitle("Total Length of Reads/Total bps per Bin") + 
+  guides(fill=FALSE) + 
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"))
+```
+### Total Length of Reads/Total bps per Bin
+```{r echo=F, results='asis', fig.width = 12, fig.align = "center", fig.asp=0.62}
+totLenBinsPlot
+```
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='hide'}
+# Plot log10 (x-axis) density of read lengths with N50 
+pPassLog <- ggplot(seqSumTabSubSetPass, 
+                   aes(x=read_len)) + 
+  geom_density() + 
+  scale_x_log10() + 
+  ggtitle("Read Length Density (log10)") +
+  xlab("Read Length") + 
+  ylab("Density") +
+  geom_vline(aes(xintercept=N50),
+             color="blue", linetype="dashed", size=1) 
+```
+### Read Length Density (Log10)
+```{r echo=F, results='asis', out.width = "70%", fig.align = "center"}
+pPassLog
+```
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='hide'}
+### Sequencing (Bps) Output Over Time
+seqSumTabSubSetPassTime <- seqSumTabSubSetPass[order(seqSumTabSubSetPass$start_time),]
+seqSumTabSubSetPassTime$hours <- ceiling(seqSumTabSubSetPassTime$start_time/3600)
+bTime <- c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,
+           19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,
+           37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,
+           56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73)
+btags <- c("1","2", "3", "4",
+          "5", "6","7", "8", "9",
+          "10", "11","12","13", "14", 
+          "15", "16","17", "18",
+          "19", "20","21", "22", "23",
+          "24", "25", "26", "27", "28",
+          "29", "30", "31", "32", "33",
+          "34", "35", "36", "37", "38",
+          "39", "40", "41", "42", "43",
+          "44", "45", "46", "47", "48",
+          "49", "50", "51", "52", "53", 
+          "54", "55", "56", "57", "58",
+          "59", "60", "61", "62", "63",
+          "64", "65", "66", "67", "68",
+          "69", "70", "71", "72", "73+")
+seqSumTabSubSetPassTime$hours.cat <- cut(seqSumTabSubSetPassTime$hours, breaks = bTime, labels = btags)
+
+#Create df & plot of total length of reads/total bps per hourly bin
+bpsPerHoursDf <- data.frame(matrix(nrow = 73, ncol = 2))
+colnames(bpsPerHoursDf) <- c("Bin", "tot_bps_per_bin")
+timeTagList <- list(btags)
+bpsPerHoursDf$Bin <- unlist(timeTagList)
+
+# Calculate total length of bps within each bin and assign to df
+bpsPerHoursDf[1,2] <- sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="1")])
+bpsPerHoursDf[2,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="2")])
+bpsPerHoursDf[3,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="3")])
+bpsPerHoursDf[4,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="4")])
+bpsPerHoursDf[5,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="5")])
+bpsPerHoursDf[6,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="6")])
+bpsPerHoursDf[7,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="7")])
+bpsPerHoursDf[8,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="8")])
+bpsPerHoursDf[9,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="9")])
+bpsPerHoursDf[10,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="10")])
+bpsPerHoursDf[11,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="11")])
+bpsPerHoursDf[12,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="12")])
+bpsPerHoursDf[13,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="13")])
+bpsPerHoursDf[14,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="14")])
+bpsPerHoursDf[15,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="15")])
+bpsPerHoursDf[16,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="16")])
+bpsPerHoursDf[17,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="17")])
+bpsPerHoursDf[18,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="18")])
+bpsPerHoursDf[19,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="19")])
+bpsPerHoursDf[20,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="20")])
+bpsPerHoursDf[21,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="21")])
+bpsPerHoursDf[22,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="22")])
+bpsPerHoursDf[23,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="23")])
+bpsPerHoursDf[24,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="24")])
+bpsPerHoursDf[25,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="25")])
+bpsPerHoursDf[26,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="26")])
+bpsPerHoursDf[27,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="27")])
+bpsPerHoursDf[28,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="28")])
+bpsPerHoursDf[29,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="29")])
+bpsPerHoursDf[30,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="30")])
+bpsPerHoursDf[31,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="31")])
+bpsPerHoursDf[32,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="32")])
+bpsPerHoursDf[33,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="33")])
+bpsPerHoursDf[34,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="34")])
+bpsPerHoursDf[35,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="35")])
+bpsPerHoursDf[36,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="36")])
+bpsPerHoursDf[37,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="37")])
+bpsPerHoursDf[38,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="38")])
+bpsPerHoursDf[39,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="39")])
+bpsPerHoursDf[40,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="40")])
+bpsPerHoursDf[41,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="41")])
+bpsPerHoursDf[42,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="42")])
+bpsPerHoursDf[43,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="43")])
+bpsPerHoursDf[44,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="44")])
+bpsPerHoursDf[45,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="45")])
+bpsPerHoursDf[46,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="46")])
+bpsPerHoursDf[47,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="47")])
+bpsPerHoursDf[48,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="48")])
+bpsPerHoursDf[49,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="49")])
+bpsPerHoursDf[50,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="50")])
+bpsPerHoursDf[51,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="51")])
+bpsPerHoursDf[52,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="52")])
+bpsPerHoursDf[53,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="53")])
+bpsPerHoursDf[54,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="54")])
+bpsPerHoursDf[55,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="55")])
+bpsPerHoursDf[56,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="56")])
+bpsPerHoursDf[57,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="57")])
+bpsPerHoursDf[58,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="58")])
+bpsPerHoursDf[59,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="59")])
+bpsPerHoursDf[60,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="60")])
+bpsPerHoursDf[61,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="61")])
+bpsPerHoursDf[62,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="62")])
+bpsPerHoursDf[63,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="63")])
+bpsPerHoursDf[64,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="64")])
+bpsPerHoursDf[65,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="65")])
+bpsPerHoursDf[66,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="66")])
+bpsPerHoursDf[67,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="67")])
+bpsPerHoursDf[68,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="68")])
+bpsPerHoursDf[69,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="69")])
+bpsPerHoursDf[70,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="70")])
+bpsPerHoursDf[71,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="71")])
+bpsPerHoursDf[72,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="72")])
+bpsPerHoursDf[73,2] <-sum(seqSumTabSubSetPassTime$read_len[which(seqSumTabSubSetPassTime$hours.cat=="73+")])
+
+# Binned read density plot
+bpsPerHourPlot <- ggplot(data=bpsPerHoursDf, 
+                         aes(x=fct_inorder(Bin), y=tot_bps_per_bin,fill=Bin)) +
+  ggtitle("Total Length of Reads/Total bps per Bin") + 
+  theme(text = element_text(size=6)) +
+  geom_bar(stat='identity',width = 0.5, position = position_dodge(width=0.5)) +
+  xlab("Hours") + 
+  ylab("bp") + 
+  guides(fill=FALSE) 
+```
+### Sequencing (bps) Output Over Time
+```{r echo=F, results='asis', out.width = '1800px', fig.align = "center"}
+bpsPerHourPlot
+```
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='hide'}
+#Create df & plot of (ALL) total length of reads/total percentage of bps and total cumulative bps per hourly bin
+percent <- function(x, digits = 2, format = "f", ...){      # Create user-defined function
+  paste0(formatC(x, format = format, digits = digits, ...), "%")
+}
+bpsPercentHoursDf <- data.frame(matrix(nrow = 73, ncol = 3))
+colnames(bpsPercentHoursDf) <- c("Bin", "Percentage_Per_Hour", "Cumulative_Percentage")
+bpsPercentHoursDf$Bin <- unlist(timeTagList)
+bpsPercentHoursDf[1:73,2] <- (bpsPerHoursDf[1:73,2] / total_length)*100
+readSum <- 0
+for(i in 1:73) {
+  readSum <- bpsPercentHoursDf[i,2] + readSum
+  bpsPercentHoursDf[i,3] <- readSum
+}
+readSum <- 0
+
+# Percentage of total bps per binned hour
+bpsPercentHoursPlot <- ggplot(data=bpsPercentHoursDf, 
+                              aes(x=fct_inorder(Bin), y=Percentage_Per_Hour,fill=Bin)) +
+  ggtitle("Percentage of Total bps Sequenced Within Hour") + 
+  theme(text = element_text(size=6)) +
+  geom_bar(stat='identity',width = 0.5, position = position_dodge(width=0.5)) +
+  xlab("Hours") + 
+  ylab("Percentage") + 
+  guides(fill=FALSE) 
+### Sequencing (Bps) Output Over Time
+```
+### Percentage of bps Sequenced Per Hour 
+```{r echo=F, results='asis', out.width = '1800px', fig.align = "center"}
+bpsPercentHoursPlot
+```
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='hide'}
+#Create df & plot of (24/48/72) total length of reads/total percentage of bps and total cumulative bps per hourly bin
+bpsPercentQuarterlyHoursDf <- data.frame(matrix(nrow = 3, ncol = 2))
+colnames(bpsPercentQuarterlyHoursDf) <- c("Bin","Cumulative_Percentage")
+bpsPercentQuarterlyHoursDf[1,1] <- "24"
+bpsPercentQuarterlyHoursDf[2,1] <- "48"
+bpsPercentQuarterlyHoursDf[3,1] <- "72"
+bpsPercentQuarterlyHoursDf[1,2] <- bpsPercentHoursDf[24,3]
+bpsPercentQuarterlyHoursDf[2,2] <- bpsPercentHoursDf[48,3]
+bpsPercentQuarterlyHoursDf[3,2] <- bpsPercentHoursDf[72,3]
+
+# Percentage of total bps per (24, 48, 72) binned hour
+bpsPercentQuarterlyHoursPlot <- ggplot(data=bpsPercentQuarterlyHoursDf, 
+                              aes(x=fct_inorder(Bin), y=Cumulative_Percentage,fill=Bin)) +
+  ggtitle("Percentage of Total bps Sequenced Within Hour") + 
+  theme(text = element_text(size=9)) +
+  geom_bar(stat='identity',width = 0.5, position = position_dodge(width=0.5)) +
+  geom_text(aes(label = sprintf("%.2f", Cumulative_Percentage), y= Cumulative_Percentage),  vjust = 3) +
+  xlab("Hours") + 
+  ylab("Percentage") + 
+  guides(fill=FALSE) 
+```
+### Percentage of bps Sequenced Per 24, 48 and 72 Hours 
+```{r echo=F, results='asis', out.width = "70%", fig.align = "center"}
+bpsPercentQuarterlyHoursPlot
+```
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='hide'}
+# Convert dfs to percentages
+bpsPercentHoursDf$Percentage_Per_Hour <- lapply(bpsPercentHoursDf$Percentage_Per_Hour, round, 2)
+bpsPercentHoursDf$Percentage_Per_Hour <- percent(as.numeric(bpsPercentHoursDf$Percentage_Per_Hour))
+bpsPercentHoursDf$Cumulative_Percentage <- lapply(bpsPercentHoursDf$Cumulative_Percentage, round, 2)
+bpsPercentHoursDf$Cumulative_Percentage <- percent(as.numeric(bpsPercentHoursDf$Cumulative_Percentage))
+bpsPercentQuarterlyHoursDf$Cumulative_Percentage <- lapply(bpsPercentQuarterlyHoursDf$Cumulative_Percentage, round, 2)
+bpsPercentQuarterlyHoursDf$Cumulative_Percentage <- percent(as.numeric(bpsPercentQuarterlyHoursDf$Cumulative_Percentage))
+```
+### Percentage of bps Sequenced Per 24, 48 and 72 Hours Table
+```{r echo=FALSE}
+#Create table & plot with proper formatting
+kable(bpsPercentQuarterlyHoursDf) %>%
+  kable_styling(bootstrap_options = "striped", full_width=F, position="left")
+```
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='hide'}
+# Gbs per hour 
+gbsPerHourDf <- data.frame(matrix(nrow = 73, ncol = 3))
+colnames(gbsPerHourDf) <- c("Bin", "Gigabases", "Cumulative_Gigabases")
+gbsPerHourDf$Bin <- unlist(timeTagList)
+gbsPerHourDf[1:73,2] <- (bpsPerHoursDf[1:73,2] )/ 1000000000
+
+# Total gbs per binned hour
+gbsPerHourPlot <- ggplot(data=gbsPerHourDf, 
+                              aes(x=fct_inorder(Bin), y=Gigabases,fill=Bin)) +
+  ggtitle("Total gbs Per Hour") + 
+  theme(text = element_text(size=6)) +
+  geom_bar(stat='identity',width = 0.5, position = position_dodge(width=0.5)) +
+  xlab("Hours") + 
+  ylab("gbs") + 
+  guides(fill=FALSE) 
+```
+### Gbs Sequenced Per Hour
+```{r echo=F, results='asis', out.width = '1800px', fig.align = "center"}
+gbsPerHourPlot
+```
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='hide'}
+# Cumulative Gbs per hour 
+gbSum <- 0
+for(i in 1:73) {
+  gbSum <- gbsPerHourDf[i,2] + gbSum
+  gbsPerHourDf[i,3] <- gbSum
+}
+gbSum <- 0
+
+# Total Cumulative gbs per binned hour
+gbsPerHourPlot <- ggplot(data=gbsPerHourDf, 
+                         aes(x=fct_inorder(Bin), y=Cumulative_Gigabases,fill=Bin)) +
+  ggtitle("Total Cumulative gbs Per Hour") + 
+  theme(text = element_text(size=6)) +
+  geom_bar(stat='identity',width = 0.5, position = position_dodge(width=0.5)) +
+  xlab("Hours") + 
+  ylab("gbs") + 
+  guides(fill=FALSE)
+```
+### Total Cumulative Gbs Sequenced Per Hour
+```{r echo=F, results='asis', out.width = '1800px', fig.align = "center"}
+gbsPerHourPlot
+```
+```{r,warning=FALSE,message=FALSE, echo=FALSE, results='hide'}
+# Gbs per 24, 48, 72 hours
+gbsPerQuartHourDf <- data.frame(matrix(nrow = 3, ncol = 3))
+colnames(gbsPerQuartHourDf) <- c("Bin", "Gigabases","Flowcell_ID")
+gbsPerQuartHourDf[1,1] <- "24"
+gbsPerQuartHourDf[2,1] <- "48"
+gbsPerQuartHourDf[3,1] <- "72"
+gbsPerQuartHourDf[1,2] <- gbsPerHourDf[24,3]
+gbsPerQuartHourDf[2,2] <- gbsPerHourDf[48,3]
+gbsPerQuartHourDf[3,2] <- gbsPerHourDf[72,3]
+gbsPerQuartHourDf[1:3,3] <- seqSumTabSubSet$Flowcell.ID[1]
+
+# Write 24 48 and 72 hour df to text file
+write.table(gbsPerQuartHourDf,"gbsPerHour.txt",
+            sep="\t",row.names=FALSE,append = TRUE)
+
+# Percentage of total bps per (24, 48, 72) binned hour
+gbsPercentQuarterlyHoursPlot <- ggplot(data=gbsPerQuartHourDf, 
+                                       aes(x=fct_inorder(Bin), y=Gigabases,fill=Bin)) +
+  ggtitle("Total gbs Sequenced Per 24, 48 and 72 Hours") + 
+  theme(text = element_text(size=13)) +
+  geom_bar(stat='identity',width = 0.5, position = position_dodge(width=0.5)) +
+  geom_text(aes(label = sprintf("%.2f", Gigabases), y= Gigabases),  vjust = 3) +
+  xlab("Hours") + 
+  ylab("gbs") + 
+  guides(fill=FALSE) 
+```
+### Gbs Sequenced Per 24, 48 and 72 Hours
+```{r echo=F, results='asis', out.width = "70%", fig.align = "center"}
+gbsPercentQuarterlyHoursPlot
+```
